@@ -114,7 +114,7 @@ spec:
       # 配置管理Sidecar容器
       - name: config-sidecar
         image: harbor.local:32295/thanos-config-sidecar:v1.0.0
-        command: ["python", "-m", "thanos_store_operator.sidecar"]
+        command: ["python", "sidecar.py"]
         env:
         - name: POD_NAME
           valueFrom:

@@ -10,6 +10,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+
 class ThanosSidecar:
     """运行在Thanos Store Gateway Pod中的Sidecar容器"""
     
@@ -122,3 +123,17 @@ class ThanosSidecar:
                 logger.error(f"Error watching config: {e}")
             
             time.sleep(30)  # 每30秒检查一次
+
+
+# sidecar/sidecar.py 末尾添加
+if __name__ == "__main__":
+    import logging
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+
+    sidecar = ThanosSidecar()
+    print(f"Starting sidecar for pod: {sidecar.pod_name}")
+    sidecar.watch_for_changes()
