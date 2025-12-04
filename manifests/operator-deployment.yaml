@@ -18,7 +18,7 @@ spec:
       - name: operator
         image: harbor.local:32295/thanos-store-operator:v1.0.0
         imagePullPolicy: IfNotPresent
-        args: ["--config", "/app/config/config.yaml"]
+#        args: ["--config", "/app/config/config.yaml"]
         volumeMounts:
         - name: config
           mountPath: /app/config
