@@ -1,0 +1,145 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: thanos-store-gateway
+  namespace: monitoring
+spec:
+  serviceName: thanos-store-gateway
+  replicas: 6
+  selector:
+    matchLabels:
+      app: thanos-store-gateway
+  template:
+    metadata:
+      labels:
+        app: thanos-store-gateway
+    spec:
+      tolerations:
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      initContainers:
+      - name: init-config
+        image: alpine:3.18
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "Initializing Thanos configuration..."
+            # 创建初始配置
+            mkdir -p /etc/thanos
+            cat > /etc/thanos/config.yaml << EOF
+            type: STORE
+            grpc_address: 0.0.0.0:10901
+            http_address: 0.0.0.0:10902
+            data_dir: /data
+            objstore_config:
+              type: S3
+              config:
+                bucket: thanos
+                endpoint: minio.monitoring.svc.cluster.local:9000
+                access_key: minioadmin
+                secret_key: minioadmin
+                insecure: true
+            index_cache:
+              type: IN-MEMORY
+              config:
+                max_size: 512MB
+            store:
+              grpc:
+                series_max_concurrency: 10
+                series_sample_limit: 0
+            min_time: 0000-01-01T00:00:00.000Z
+            max_time: 9999-12-31T23:59:59.999Z
+            EOF
+            echo "Initial configuration created"
+        volumeMounts:
+        - name: thanos-config
+          mountPath: /etc/thanos
+      containers:
+      # Thanos Store Gateway 主容器
+      - name: thanos
+        image: thanosio/thanos:v0.32.1
+        command:
+        - "thanos"
+        args:
+        - "store"
+        - "--config.file=/etc/thanos/config.yaml"
+        - "--log.level=debug"
+        - "--objstore.config=$(OBJSTORE_CONFIG)"
+        - "--data-dir=/data"
+        - "--grpc-address=0.0.0.0:10901"
+        - "--http-address=0.0.0.0:10902"
+        - "--sync-block-duration=5m"
+        - "--block-sync-concurrency=10"
+        env:
+        - name: OBJSTORE_CONFIG
+          valueFrom:
+            secretKeyRef:
+              name: thanos-objstore-config
+              key: thanos.yaml
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        ports:
+        - containerPort: 10901
+          name: grpc
+        - containerPort: 10902
+          name: http
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        - name: thanos-config
+          mountPath: /etc/thanos
+        livenessProbe:
+          httpGet:
+            path: /-/healthy
+            port: 10902
+          initialDelaySeconds: 120
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /-/ready
+            port: 10902
+          initialDelaySeconds: 180
+          periodSeconds: 20
+        resources:
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+      
+      # 配置管理Sidecar容器
+      - name: config-sidecar
+        image: harbor.local:32295/thanos-config-sidecar:v1.0.0
+        command: ["python", "-m", "thanos_store_operator.sidecar"]
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: CONFIG_PATH
+          value: "/etc/thanos-operator/config.yaml"
+        volumeMounts:
+        - name: thanos-config
+          mountPath: /etc/thanos
+        - name: operator-config
+          mountPath: /etc/thanos-operator
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+      
+      volumes:
+      - name: data
+        emptyDir: {}
+      - name: thanos-config
+        emptyDir: {}
+      - name: operator-config
+        configMap:
+          name: thanos-store-config

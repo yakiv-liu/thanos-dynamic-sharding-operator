@@ -1,0 +1,18 @@
+operator:
+  update_interval: 300  # 5分钟更新一次配置
+  namespace: monitoring
+  statefulset_name: thanos-store-gateway
+  configmap_name: thanos-store-config
+
+sharding:
+  total_shards: 3  # 分片数量
+  replicas_per_shard: 2  # 每个分片的副本数
+  data_retention_days: 370  # 保留天数(12个月+10天缓冲)
+  shard_overlap_days: 1  # 分片重叠天数
+  future_buffer_hours: 24  # 未来缓冲时间（小时）
+  
+thanos:
+  grpc_port: 10901
+  http_port: 10902
+  config_reload_signal: "SIGHUP"
+  config_path: "/etc/thanos/config.yaml"
