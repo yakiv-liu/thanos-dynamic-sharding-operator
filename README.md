@@ -99,7 +99,7 @@ sharding:
 
 ## 监控与运维
 
-*   **Operator 指标**：Operator Pod 的 `/metrics` 端点提供协调次数、配置更新状态等指标。
+*   **Operator 指标**：Operator Pod 的 `/metrics` 端点提供协调次数、配置更新状态等指标。(还未实现)
 *   **Sidecar 日志**：每个 Store Gateway Pod 中的 `config-sidecar` 容器会输出配置变更日志。
 *   **验证配置**：检查 `thanos-store-config` ConfigMap 的内容，或通过 Thanos Query 的 `/stores` 端点查看各 Store Gateway 上报的时间范围标签。
 

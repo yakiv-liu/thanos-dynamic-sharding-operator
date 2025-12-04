@@ -1,25 +1,18 @@
-FROM python:3.9-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# 安装依赖
+# 1. 复制依赖声明并安装
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 复制源代码
-COPY src/ src/
+# 2. 复制项目代码
+COPY src/ ./src/
+COPY config/ ./config/
 COPY setup.py .
 
-# 安装包
+# 3. 以开发模式安装当前包，便于导入
 RUN pip install -e .
 
-# 复制配置文件
-COPY config/ config/
-
-# 创建非root用户
-RUN useradd -m -u 1000 operator && \
-    chown -R operator:operator /app
-
-USER operator
-
+# 4. 设置默认启动命令
 ENTRYPOINT ["python", "-m", "thanos_store_operator.operator"]
