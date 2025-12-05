@@ -25,33 +25,13 @@ spec:
         args:
           - |
             echo "Initializing Thanos configuration..."
-            # 创建初始配置
+            # 创建初始配置，只包含 min-time 和 max-time
             mkdir -p /etc/thanos
             cat > /etc/thanos/config.yaml << EOF
-            type: STORE
-            grpc_address: 0.0.0.0:10901
-            http_address: 0.0.0.0:10902
-            data_dir: /data
-            objstore_config:
-              type: S3
-              config:
-                bucket: thanos
-                endpoint: minio.monitoring.svc.cluster.local:9000
-                access_key: minioadmin
-                secret_key: minioadmin
-                insecure: true
-            index_cache:
-              type: IN-MEMORY
-              config:
-                max_size: 512MB
-            store:
-              grpc:
-                series_max_concurrency: 10
-                series_sample_limit: 0
             min_time: 0000-01-01T00:00:00.000Z
             max_time: 9999-12-31T23:59:59.999Z
             EOF
-            echo "Initial configuration created"
+            echo "Configuration with min-time and max-time created"
         volumeMounts:
         - name: thanos-config
           mountPath: /etc/thanos
@@ -71,6 +51,10 @@ spec:
         - "--http-address=0.0.0.0:10902"
         - "--sync-block-duration=5m"
         - "--block-sync-concurrency=10"
+        # 从原配置文件移出的参数
+        - "--index-cache.config=type: IN-MEMORY\nconfig:\n  max_size: 512MB"
+        - "--store.grpc.series-max-concurrency=10"
+        - "--store.grpc.series-sample-limit=0"
         env:
         - name: OBJSTORE_CONFIG
           valueFrom:
@@ -110,7 +94,7 @@ spec:
           requests:
             memory: "256Mi"
             cpu: "250m"
-      
+
       # 配置管理Sidecar容器
       - name: config-sidecar
         image: harbor.local:32295/thanos-config-sidecar:v1.0.0
@@ -134,7 +118,7 @@ spec:
           requests:
             memory: "64Mi"
             cpu: "50m"
-      
+
       volumes:
       - name: data
         emptyDir: {}

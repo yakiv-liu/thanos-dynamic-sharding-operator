@@ -16,8 +16,7 @@ logger = logging.getLogger(__name__)
 
 class ThanosStoreOperator:
     """Thanos Store Gateway Operator"""
-    # def __init__(self, config_path: str = "config/config.yaml"):
-    #     self.config_manager = ConfigManager(config_path)
+
     def __init__(self, config_path: str = None):
         # 如果没有指定，使用默认路径
         if config_path is None:
@@ -59,13 +58,16 @@ class ThanosStoreOperator:
             # 更新ConfigMap
             self._update_configmap(pod_configs)
 
+            # 如果需要，直接更新Pod的配置
+            self._update_pod_configs(pods.items, pod_configs)
+
             logger.info(f"Reconciled {len(pod_configs)} pods")
 
         except ApiException as e:
             logger.error(f"Kubernetes API error: {e}")
 
     def _calculate_pod_configs(self, pods: List) -> Dict:
-        """为每个Pod计算配置"""
+        """为每个Pod计算配置 - 只包含时间范围"""
         # 计算所有分片的时间范围
         shard_ranges = self.shard_calculator.calculate_shard_ranges()
 
@@ -78,6 +80,7 @@ class ThanosStoreOperator:
             # 获取Pod对应的分片
             shard_config = self.shard_calculator.get_shard_for_pod(pod_index, shard_ranges)
 
+            # 只生成包含时间范围的配置
             pod_configs[pod_name] = {
                 'pod_index': pod_index,
                 'shard_index': shard_config['shard_index'],
@@ -86,9 +89,7 @@ class ThanosStoreOperator:
                     'max_time': shard_config['max_time'],
                     'min_timestamp': shard_config['min_time_timestamp'],
                     'max_timestamp': shard_config['max_time_timestamp']
-                },
-                'grpc_port': self.operator_config['thanos']['grpc_port'],
-                'http_port': self.operator_config['thanos']['http_port']
+                }
             }
 
         return pod_configs
@@ -102,10 +103,11 @@ class ThanosStoreOperator:
             return 0
 
     def _update_configmap(self, pod_configs: Dict):
-        """更新ConfigMap"""
+        """更新ConfigMap - 包含完整配置信息供sidecar使用"""
         namespace = self.operator_config['operator']['namespace']
         configmap_name = self.operator_config['operator']['configmap_name']
 
+        # 构建完整的配置信息，包括operator和分片配置
         config_data = {
             'operator': self.operator_config['operator'],
             'sharding': self.operator_config['sharding'],
@@ -145,6 +147,24 @@ class ThanosStoreOperator:
                 body=cm
             )
 
+    def _update_pod_configs(self, pods: List, pod_configs: Dict):
+        """更新Pod的配置文件 - 只包含时间范围"""
+        for pod in pods:
+            pod_name = pod.metadata.name
+            if pod_name in pod_configs:
+                pod_config = pod_configs[pod_name]
+
+                # 生成只包含时间范围的配置文件
+                time_range_config = {
+                    'min_time': pod_config['time_range']['min_time'],
+                    'max_time': pod_config['time_range']['max_time']
+                }
+
+                # 这里可以添加逻辑来直接更新Pod的配置文件
+                # 例如，通过k8s API在Pod中创建或更新配置文件
+                # 或者依赖sidecar容器来更新配置文件
+                logger.debug(f"Pod {pod_name} time range: {time_range_config}")
+
     def run(self):
         """运行Operator主循环"""
         update_interval = self.operator_config['operator'].get('update_interval', 300)
@@ -163,11 +183,8 @@ class ThanosStoreOperator:
                 time.sleep(60)
 
 
-# 在 operator.py 末尾添加以下代码
-
 def main():
     """Operator主入口点"""
-    # 支持通过环境变量覆盖配置路径
     import os
     config_path = os.environ.get('OPERATOR_CONFIG_PATH', '/app/config/config.yaml')
 
