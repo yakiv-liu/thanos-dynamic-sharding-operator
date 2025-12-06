@@ -1,5 +1,5 @@
 # Thanos Store Gateway 动态时间分片 Operator
-
+# 此项目已弃用，不使用了
 ## 概述
 
 这是一个用于解决 **Thanos Store Gateway 长期数据查询动态分片** 问题的 Kubernetes Operator。它能够自动为 Store Gateway 的 Pod 计算并滚动更新时间查询范围，无需手动干预或重启 Pod，实现真正的“动态时间分片”。
