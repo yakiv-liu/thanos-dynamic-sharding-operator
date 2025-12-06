@@ -5,6 +5,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class ConfigManager:
     """配置文件管理器"""
     

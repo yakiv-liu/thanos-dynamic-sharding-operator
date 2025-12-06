@@ -41,10 +41,10 @@ class ThanosStoreOperator:
 
         try:
             # 获取StatefulSet
-            sts = self.apps_v1.read_namespaced_stateful_set(
-                name=statefulset_name,
-                namespace=namespace
-            )
+            # sts = self.apps_v1.read_namespaced_stateful_set(
+            #     name=statefulset_name,
+            #     namespace=namespace
+            # )
 
             # 获取所有Pod
             pods = self.core_v1.list_namespaced_pod(
