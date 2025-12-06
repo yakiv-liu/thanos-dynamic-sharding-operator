@@ -71,26 +71,58 @@ class ThanosStoreOperator:
         # 计算所有分片的时间范围
         shard_ranges = self.shard_calculator.calculate_shard_ranges()
 
+        # 获取分片配置参数
+        total_shards = self.operator_config['sharding']['total_shards']
+        replicas_per_shard = self.operator_config['sharding'].get('replicas_per_shard', 1)
+
         pod_configs = {}
 
         for pod in pods:
             pod_name = pod.metadata.name
             pod_index = self._extract_pod_index(pod_name)
 
-            # 获取Pod对应的分片
-            shard_config = self.shard_calculator.get_shard_for_pod(pod_index, shard_ranges)
+            # MODIFIED: 根据replicas_per_shard计算pod属于哪个分片
+            # 如果replicas_per_shard=2，那么pod_index 0和1属于分片0，2和3属于分片1，以此类推
+            shard_index = pod_index // replicas_per_shard if replicas_per_shard > 0 else pod_index
+
+            # 确保分片索引不超过总分片数
+            if shard_index >= len(shard_ranges):
+                logger.warning(f"Pod {pod_name} (index {pod_index}) calculated shard index {shard_index} "
+                               f"exceeds total shards {len(shard_ranges)}. Using last shard.")
+                shard_index = len(shard_ranges) - 1
+
+            # MODIFIED: 从shard_ranges中获取对应分片的配置
+            shard_config = None
+            for shard in shard_ranges:
+                if shard.get('shard_index') == shard_index:
+                    shard_config = shard
+                    break
+
+            if not shard_config:
+                logger.error(f"No shard config found for shard index {shard_index}")
+                # 使用第一个分片作为后备
+                shard_config = shard_ranges[0] if shard_ranges else {
+                    'shard_index': 0,
+                    'min_time': '0000-01-01T00:00:00.000Z',
+                    'max_time': '9999-12-31T23:59:59.999Z'
+                }
 
             # 只生成包含时间范围的配置
             pod_configs[pod_name] = {
                 'pod_index': pod_index,
-                'shard_index': shard_config['shard_index'],
+                'shard_index': shard_index,  # MODIFIED: 使用计算得到的分片索引
+                'replica_in_shard': pod_index % replicas_per_shard,  # ADDED: 添加副本在分片中的位置
                 'time_range': {
                     'min_time': shard_config['min_time'],
                     'max_time': shard_config['max_time'],
-                    'min_timestamp': shard_config['min_time_timestamp'],
-                    'max_timestamp': shard_config['max_time_timestamp']
+                    'min_timestamp': shard_config.get('min_time_timestamp', 0),
+                    'max_timestamp': shard_config.get('max_time_timestamp', 0)
                 }
             }
+
+            logger.debug(f"Pod {pod_name}: index={pod_index}, shard={shard_index}, "
+                         f"replica={pod_index % replicas_per_shard}, "
+                         f"time_range={shard_config['min_time']} to {shard_config['max_time']}")
 
         return pod_configs
 
@@ -133,6 +165,7 @@ class ThanosStoreOperator:
                 namespace=namespace,
                 body=cm
             )
+            logger.info(f"Updated ConfigMap {configmap_name}")
         except ApiException:
             # 创建新的ConfigMap
             cm = client.V1ConfigMap(
@@ -146,6 +179,7 @@ class ThanosStoreOperator:
                 namespace=namespace,
                 body=cm
             )
+            logger.info(f"Created ConfigMap {configmap_name}")
 
     def _update_pod_configs(self, pods: List, pod_configs: Dict):
         """更新Pod的配置文件 - 只包含时间范围"""
