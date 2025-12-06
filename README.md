@@ -55,11 +55,11 @@
 1.  **构建镜像**
     ```bash
     # 构建 Operator 镜像
-    docker build -t your-registry/thanos-store-operator:v1.0.0 .
+    docker build -t harbor.local/thanos-store-operator:v1.0.0 .
     # 构建 Sidecar 镜像
-    docker build -f sidecar/Dockerfile -t your-registry/thanos-config-sidecar:v1.0.0 .
-    docker push your-registry/thanos-store-operator:v1.0.0
-    docker push your-registry/thanos-config-sidecar:v1.0.0
+    docker build -f sidecar/Dockerfile -t harbor.local/thanos-config-sidecar:v1.0.0 .
+    docker push harbor.local/thanos-store-operator:v1.0.0
+    docker push harbor.local/thanos-config-sidecar:v1.0.0
     ```
 
 2.  **部署配置和 Operator**
