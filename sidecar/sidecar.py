@@ -1,8 +1,6 @@
 import os
 import yaml
 import time
-import signal
-import subprocess
 import logging
 from typing import Dict, Any
 
@@ -14,7 +12,7 @@ class ThanosSidecar:
 
     def __init__(self, config_path: str = "/etc/thanos-operator/config.yaml"):
         self.config_path = config_path
-        self.thanos_config_path = "/etc/thanos/config.yaml"
+        self.time_range_env_path = "/etc/thanos/time-range.env"
         self.pod_name = os.getenv('POD_NAME', '')
         self.pod_index = self._extract_pod_index()
 
@@ -37,61 +35,44 @@ class ThanosSidecar:
             logger.error(f"Failed to load config: {e}")
             return {}
 
-    def load_current_thanos_config(self) -> Dict[str, Any]:
-        """加载当前Thanos配置文件"""
+    def update_time_range_env(self, min_time: str, max_time: str):
+        """更新时间范围环境变量文件"""
         try:
-            if os.path.exists(self.thanos_config_path):
-                with open(self.thanos_config_path, 'r') as f:
-                    return yaml.safe_load(f)
-            else:
-                # 如果配置文件不存在，创建默认配置
-                logger.warning(f"Thanos config file not found at {self.thanos_config_path}, creating default")
-                default_config = {
-                    'min_time': '0000-01-01T00:00:00.000Z',
-                    'max_time': '9999-12-31T23:59:59.999Z'
-                }
-                return default_config
-        except Exception as e:
-            logger.error(f"Failed to load Thanos config: {e}")
-            return {'min_time': '0000-01-01T00:00:00.000Z', 'max_time': '9999-12-31T23:59:59.999Z'}
+            env_content = f"MIN_TIME={min_time}\nMAX_TIME={max_time}\n"
 
-    def update_thanos_time_range(self, min_time: str, max_time: str):
-        """只更新Thanos配置文件中的时间范围"""
-        try:
-            # 1. 加载当前的Thanos配置
-            current_config = self.load_current_thanos_config()
+            # 确保目录存在
+            os.makedirs(os.path.dirname(self.time_range_env_path), exist_ok=True)
 
-            # 2. 只更新min_time和max_time字段，保持其他所有配置不变
-            current_config['min_time'] = min_time
-            current_config['max_time'] = max_time
-
-            # 3. 写入更新后的配置
-            config_yaml = yaml.dump(current_config, default_flow_style=False)
-
-            with open(self.thanos_config_path, 'w') as f:
-                f.write(config_yaml)
+            with open(self.time_range_env_path, 'w') as f:
+                f.write(env_content)
 
             logger.info(
-                f"Updated time range in Thanos config for pod {self.pod_name}: min_time={min_time}, max_time={max_time}")
+                f"Updated time range env file for pod {self.pod_name}: min_time={min_time}, max_time={max_time}")
 
-            # 4. 发送重载信号给Thanos进程
-            self.send_reload_signal()
+            # 发送信号给Thanos进程，让它重启
+            self.restart_thanos()
 
         except Exception as e:
-            logger.error(f"Failed to update Thanos time range: {e}")
+            logger.error(f"Failed to update time range env: {e}")
 
-    def send_reload_signal(self):
-        """发送SIGHUP信号给Thanos进程"""
+    def restart_thanos(self):
+        """重启Thanos进程"""
         try:
-            # 查找Thanos进程
-            result = subprocess.run(['pgrep', 'thanos'], capture_output=True, text=True)
+            # 发送SIGTERM信号给Thanos进程，让它优雅退出
+            # kubelet会自动重启容器
+            import signal
+            import subprocess
+
+            result = subprocess.run(['pgrep', '-f', 'thanos store'], capture_output=True, text=True)
             if result.returncode == 0:
                 pid = result.stdout.strip()
                 if pid:
-                    os.kill(int(pid), signal.SIGHUP)
-                    logger.info(f"Sent SIGHUP to Thanos process {pid}")
+                    os.kill(int(pid), signal.SIGTERM)
+                    logger.info(f"Sent SIGTERM to Thanos process {pid} to trigger restart")
+            else:
+                logger.warning("Thanos process not found")
         except Exception as e:
-            logger.error(f"Failed to send reload signal: {e}")
+            logger.error(f"Failed to restart Thanos: {e}")
 
     def watch_for_changes(self):
         """监听配置变化"""
@@ -130,15 +111,14 @@ class ThanosSidecar:
                                 min_time = pod_config['time_range']['min_time']
                                 max_time = pod_config['time_range']['max_time']
                             elif 'min_time' in pod_config and 'max_time' in pod_config:
-                                # 兼容直接包含min_time/max_time的格式
                                 min_time = pod_config['min_time']
                                 max_time = pod_config['max_time']
                             else:
                                 logger.error(f"No time range found in config for pod {self.pod_name}")
                                 continue
 
-                            # 只更新时间范围
-                            self.update_thanos_time_range(min_time, max_time)
+                            # 更新时间范围环境变量
+                            self.update_time_range_env(min_time, max_time)
 
                         last_hash = current_hash
                 else:

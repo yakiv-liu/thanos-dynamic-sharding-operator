@@ -19,42 +19,67 @@ spec:
         operator: "Exists"
         effect: "NoSchedule"
       initContainers:
-      - name: init-config
-        image: alpine:3.18
-        command: ["/bin/sh", "-c"]
-        args:
-          - |
-            echo "Initializing Thanos configuration..."
-            # 创建初始配置，只包含 min-time 和 max-time
-            mkdir -p /etc/thanos
-            cat > /etc/thanos/config.yaml << EOF
-            min_time: 0000-01-01T00:00:00.000Z
-            max_time: 9999-12-31T23:59:59.999Z
-            EOF
-            echo "Configuration with min-time and max-time created"
-        volumeMounts:
-        - name: thanos-config
-          mountPath: /etc/thanos
+        - name: init-config
+          image: alpine:3.18
+          command: [ "/bin/sh", "-c" ]
+          args:
+            - |
+              echo "Initializing Thanos configuration..."
+              # 从环境变量读取时间范围，如果没有则使用默认值
+              MIN_TIME=${MIN_TIME:-"0000-01-01T00:00:00.000Z"}
+              MAX_TIME=${MAX_TIME:-"9999-12-31T23:59:59.999Z"}
+
+              # 创建启动脚本，动态设置 min-time 和 max-time
+              mkdir -p /etc/thanos
+              cat > /etc/thanos/start.sh << 'EOF'
+              #!/bin/sh
+              # 读取时间范围（可能来自环境变量或文件）
+              if [ -f /etc/thanos/time-range.env ]; then
+                . /etc/thanos/time-range.env
+              fi
+
+              MIN_TIME=${MIN_TIME:-"0000-01-01T00:00:00.000Z"}
+              MAX_TIME=${MAX_TIME:-"9999-12-31T23:59:59.999Z"}
+
+              # 启动 thanos store
+              exec thanos store \
+                --log.level=debug \
+                --objstore.config=${OBJSTORE_CONFIG} \
+                --data-dir=/data \
+                --grpc-address=0.0.0.0:10901 \
+                --http-address=0.0.0.0:10902 \
+                --sync-block-duration=5m \
+                --block-sync-concurrency=10 \
+                --index-cache.config="type: IN-MEMORY\nconfig:\n  max_size: 512MB" \
+                --store.grpc.series-max-concurrency=10 \
+                --store.grpc.series-sample-limit=0 \
+                --min-time=${MIN_TIME} \
+                --max-time=${MAX_TIME}
+              EOF
+
+              chmod +x /etc/thanos/start.sh
+              echo "Initialization complete"
+          volumeMounts:
+            - name: thanos-config
+              mountPath: /etc/thanos
+          env:
+            - name: MIN_TIME
+              valueFrom:
+                configMapKeyRef:
+                  name: thanos-store-config
+                  key: min_time
+                  optional: true
+            - name: MAX_TIME
+              valueFrom:
+                configMapKeyRef:
+                  name: thanos-store-config
+                  key: max_time
+                  optional: true
       containers:
       # Thanos Store Gateway 主容器
       - name: thanos
         image: thanosio/thanos:v0.32.1
-        command:
-        - "thanos"
-        args:
-        - "store"
-        - "--store.config=/etc/thanos/config.yaml"
-        - "--log.level=debug"
-        - "--objstore.config=$(OBJSTORE_CONFIG)"
-        - "--data-dir=/data"
-        - "--grpc-address=0.0.0.0:10901"
-        - "--http-address=0.0.0.0:10902"
-        - "--sync-block-duration=5m"
-        - "--block-sync-concurrency=10"
-        # 从原配置文件移出的参数
-        - "--index-cache.config=type: IN-MEMORY\nconfig:\n  max_size: 512MB"
-        - "--store.grpc.series-max-concurrency=10"
-        - "--store.grpc.series-sample-limit=0"
+        command: ["/etc/thanos/start.sh"]  # 使用启动脚本
         env:
         - name: OBJSTORE_CONFIG
           valueFrom:
